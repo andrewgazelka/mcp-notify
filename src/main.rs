@@ -103,10 +103,9 @@ impl NotifyServer {
             tracing::debug!("Lock released");
         });
 
-        Ok(CallToolResult::success(vec![Content::text(format!(
-            "Saying: {}",
-            args.text
-        ))]))
+        Ok(CallToolResult::success(vec![Content::text(
+            "Speaking aloud".to_string()
+        )]))
     }
 }
 
