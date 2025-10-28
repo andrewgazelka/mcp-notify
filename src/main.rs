@@ -86,6 +86,8 @@ impl NotifyServer {
 
             // Execute the say command while holding the lock
             if let Err(e) = tokio::process::Command::new("say")
+                .arg("-r")
+                .arg("300")
                 .arg(&text)
                 .output()
                 .await

@@ -19,6 +19,8 @@ Perfect for:
 claude: "Build complete" → your speakers: "Build complete"
 ```
 
+Async by default. The command returns immediately while speech happens in the background.
+
 ## Locking
 
 If multiple processes try to talk at once, they wait their turn instead of talking over each other.
