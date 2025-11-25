@@ -33,13 +33,22 @@ Uses `File::lock()` at `~/.notify-lock/say.lock`:
 
 ## Install
 
+### Claude Code (recommended)
+
+```bash
+pnpx @anthropic-ai/claude-code mcp add --transport stdio notify nix run github:andrewgazelka/mcp-notify
+```
+
+### Manual
+
 Add to Claude Code MCP config:
 
 ```json
 {
   "mcpServers": {
-    "mcp-notify": {
-      "command": "/path/to/mcp-notify"
+    "notify": {
+      "command": "nix",
+      "args": ["run", "github:andrewgazelka/mcp-notify"]
     }
   }
 }
