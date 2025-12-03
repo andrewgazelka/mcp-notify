@@ -1,4 +1,6 @@
-# mcp-notify
+<p align="center">
+  <img src="assets/header.svg" alt="mcp-notify" width="400">
+</p>
 
 ## Install
 
