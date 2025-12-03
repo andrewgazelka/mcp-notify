@@ -1,5 +1,14 @@
 # mcp-notify
 
+## Install
+
+### Claude Code (recommended)
+
+```bash
+claude mcp add --scope user --transport stdio notify nix run github:andrewgazelka/mcp-notify
+```
+
+
 MCP server that speaks to you using macOS `say`.
 
 ## Why
@@ -31,34 +40,3 @@ Uses `File::lock()` at `~/.notify-lock/say.lock`:
 - Process 1 done → unlocks
 - Process 2 speaks → your turn
 
-## Install
-
-### Claude Code (recommended)
-
-```bash
-pnpx @anthropic-ai/claude-code mcp add --transport stdio notify nix run github:andrewgazelka/mcp-notify
-```
-
-### Manual
-
-Add to Claude Code MCP config:
-
-```json
-{
-  "mcpServers": {
-    "notify": {
-      "command": "nix",
-      "args": ["run", "github:andrewgazelka/mcp-notify"]
-    }
-  }
-}
-```
-
-## Usage
-
-Claude automatically uses it via:
-```
-mcp__mcp-notify__say "your text here"
-```
-
-That's it.
