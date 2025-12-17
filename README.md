@@ -17,6 +17,22 @@ notify "Build complete"
 notify "Tests passed"
 ```
 
+## Claude Code
+
+Add to your `CLAUDE.md`:
+
+```markdown
+When you finish a task or answer a question, notify the user aloud:
+
+\`\`\`bash
+nix run github:andrewgazelka/notify -- "your message here"
+\`\`\`
+
+Use phonetic spelling for TTS readability (how it sounds, not how it's spelled).
+```
+
+Recommended over MCP since it's simpler and doesn't require server configuration.
+
 ## Why
 
 Get notified without looking at your screen.
