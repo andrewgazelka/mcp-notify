@@ -18,5 +18,5 @@
   </g>
 
   <!-- Text -->
-  <text x="200" y="100" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="600" fill="#374151" text-anchor="middle">mcp-notify</text>
+  <text x="200" y="100" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="600" fill="#374151" text-anchor="middle">notify</text>
 </svg>

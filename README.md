@@ -1,44 +1,33 @@
 <p align="center">
-  <img src="assets/header.svg" alt="mcp-notify" width="400">
+  <img src="assets/header.svg" alt="notify" width="400">
 </p>
+
+Speaks to you using macOS `say`.
 
 ## Install
 
-### Claude Code (recommended)
-
 ```bash
-claude mcp add --scope user --transport stdio notify nix run github:andrewgazelka/mcp-notify
+nix run github:andrewgazelka/notify -- "hello world"
 ```
 
+## Usage
 
-MCP server that speaks to you using macOS `say`.
+```bash
+notify "Build complete"
+notify "Tests passed"
+```
 
 ## Why
 
-Claude tells you things while you're doing other stuff.
+Get notified without looking at your screen.
 
 Perfect for:
-- Multitasking
 - Long builds
-- Context switching
-- Getting notified without looking
-
-## How It Works
-
-```bash
-# Claude finishes task
-claude: "Build complete" → your speakers: "Build complete"
-```
-
-Async by default. The command returns immediately while speech happens in the background.
+- Background tasks
+- Multitasking
 
 ## Locking
 
-If multiple processes try to talk at once, they wait their turn instead of talking over each other.
+Multiple processes wait their turn instead of talking over each other.
 
-Uses `File::lock()` at `~/.notify-lock/say.lock`:
-- Process 1 speaks → locks file
-- Process 2 tries → waits
-- Process 1 done → unlocks
-- Process 2 speaks → your turn
-
+Uses file locking at `~/.notify-lock/say.lock`.

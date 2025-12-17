@@ -35,13 +35,13 @@
 
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-          mcp-notify = craneLib.buildPackage (commonArgs // {
+          notify = craneLib.buildPackage (commonArgs // {
             inherit cargoArtifacts;
           });
         in
         {
-          inherit mcp-notify;
-          default = mcp-notify;
+          inherit notify;
+          default = notify;
         });
 
       devShells = forAllSystems (system:
@@ -63,7 +63,7 @@
         });
 
       overlays.default = final: prev: {
-        mcp-notify = self.packages.${final.system}.mcp-notify;
+        notify = self.packages.${final.system}.notify;
       };
     };
 }
