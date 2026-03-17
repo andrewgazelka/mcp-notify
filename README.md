@@ -2,48 +2,44 @@
   <img src="assets/header.svg" alt="notify" width="400">
 </p>
 
-Speaks to you using macOS `say`.
+`notify` speaks a message out loud on macOS using `say`.
 
-## Install
+Useful when an agent, script, or long-running task finishes and you are not looking at the screen.
 
-```bash
-nix run github:andrewgazelka/notify -- "hello world"
-```
-
-## Usage
+## Run
 
 ```bash
-notify "Build complete"
-notify "Tests passed"
+nix run github:andrewgazelka/notify -- "build finished"
 ```
+
+If installed locally:
+
+```bash
+notify "tests passed"
+```
+
+## What It Does
+
+`notify "..."` returns immediately.
+
+It spawns a background process, and that process:
+
+1. acquires an exclusive lock at `~/.notify-lock/say.lock`
+2. runs macOS `say`
+3. exits, releasing the lock
+
+That means multiple notifications queue naturally instead of talking over each other.
 
 ## Claude Code
 
-Add to your `CLAUDE.md`:
+Add this to `CLAUDE.md`:
 
-```markdown
-When you finish a task or answer a question, notify the user aloud:
+~~~markdown
+When you finish a task, speak a short status update:
 
-\`\`\`bash
+```bash
 nix run github:andrewgazelka/notify -- "your message here"
-\`\`\`
-
-Use phonetic spelling for TTS readability (how it sounds, not how it's spelled).
 ```
 
-Recommended over MCP since it's simpler and doesn't require server configuration.
-
-## Why
-
-Get notified without looking at your screen.
-
-Perfect for:
-- Long builds
-- Background tasks
-- Multitasking
-
-## Locking
-
-Multiple processes wait their turn instead of talking over each other.
-
-Uses file locking at `~/.notify-lock/say.lock`.
+Use phonetic spelling when text-to-speech pronunciation matters.
+~~~
