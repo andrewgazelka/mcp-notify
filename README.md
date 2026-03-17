@@ -12,6 +12,12 @@ Useful when an agent, script, or long-running task finishes and you are not look
 cargo install --path .
 ```
 
+With Nix:
+
+```bash
+nix profile install github:andrewgazelka/notify
+```
+
 ## Usage
 
 ```bash
