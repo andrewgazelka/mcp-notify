@@ -6,29 +6,30 @@
 
 Useful when an agent, script, or long-running task finishes and you are not looking at the screen.
 
-## Run
+## Install
 
 ```bash
-nix run github:andrewgazelka/notify -- "build finished"
+cargo install --path .
 ```
 
-If installed locally:
+## Usage
 
 ```bash
-notify "tests passed"
+notify "build finished"
 ```
 
 ## What It Does
 
-`notify "..."` returns immediately.
+`notify` is for short spoken status updates.
 
-It spawns a background process, and that process:
+Use it when:
 
-1. acquires an exclusive lock at `~/.notify-lock/say.lock`
-2. runs macOS `say`
-3. exits, releasing the lock
+- a build finishes
+- tests pass or fail
+- an agent completes a task
+- you are multitasking away from the screen
 
-That means multiple notifications queue naturally instead of talking over each other.
+If several notifications happen close together, they wait their turn using a lock at `~/.notify-lock/say.lock` so they do not speak over each other.
 
 ## Claude Code
 
@@ -38,7 +39,7 @@ Add this to `CLAUDE.md`:
 When you finish a task, speak a short status update:
 
 ```bash
-nix run github:andrewgazelka/notify -- "your message here"
+notify "your message here"
 ```
 
 Use phonetic spelling when text-to-speech pronunciation matters.
