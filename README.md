@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/header.svg" alt="notify" width="400">
+  <img src=".github/header.svg" alt="notify" width="360">
 </p>
 
 `notify` speaks a message out loud on macOS using `say`.

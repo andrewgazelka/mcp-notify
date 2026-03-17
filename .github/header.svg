@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 72" fill="none">
+  <rect width="360" height="72" rx="16" fill="#F6F7F8"/>
+  <g transform="translate(28 20)" stroke="#111827" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 12H18L30 3V29L18 20H8Z" fill="#111827" stroke-width="2.5"/>
+    <path d="M38 9C42 12 42 20 38 23" stroke-width="2.5"/>
+    <path d="M47 4C54 10 54 22 47 28" stroke-width="2.5"/>
+  </g>
+  <text
+    x="92"
+    y="45"
+    fill="#111827"
+    font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    font-size="28"
+    font-weight="600"
+  >
+    notify
+  </text>
+</svg>
