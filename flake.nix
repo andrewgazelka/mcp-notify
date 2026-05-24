@@ -63,7 +63,7 @@
         });
 
       overlays.default = final: prev: {
-        notify = self.packages.${final.system}.notify;
+        notify = self.packages.${final.stdenv.hostPlatform.system}.notify;
       };
     };
 }
