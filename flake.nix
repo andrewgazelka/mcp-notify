@@ -65,5 +65,20 @@
       overlays.default = final: prev: {
         notify = self.packages.${final.stdenv.hostPlatform.system}.notify;
       };
+
+      # Installs the CLI, config.toml and the launchd agent. It deliberately
+      # does NOT build notifyd: the Metal compiler lives in a cryptex mount
+      # outside /nix/store, SwiftPM needs the network, the SDK is Xcode-only and
+      # the weights are multi-GB. `make install-notifyd` handles that out of
+      # band, and the agent is written so that "plist installed, daemon not
+      # built yet" is a quiet steady state rather than a respawn loop.
+      homeManagerModules.notify = { config, lib, pkgs, ... }: {
+        imports = [ ./nix/hm-module.nix ];
+        config = lib.mkIf config.programs.notify.enable {
+          programs.notify.package = lib.mkDefault
+            self.packages.${pkgs.stdenv.hostPlatform.system}.notify;
+        };
+      };
+      homeManagerModules.default = self.homeManagerModules.notify;
     };
 }

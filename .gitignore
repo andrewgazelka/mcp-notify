@@ -1,1 +1,7 @@
 /target
+
+# Swift daemon build output. 2.6 GB of DerivedData, and `Package.resolved` is
+# the only part of it that carries information.
+notifyd/.build/
+notifyd/*.xcodeproj
+.DS_Store

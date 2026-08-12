@@ -185,6 +185,15 @@ fn print_status(settings: &Settings) {
 }
 
 fn main() -> eyre::Result<()> {
+    // Rust sets SIGPIPE to SIG_IGN before main, so writing to a closed pipe
+    // returns EPIPE and `println!` panics on it. That turns the entirely normal
+    // `notify --status | head -3` into a panic with a backtrace. Restore the
+    // default disposition so we die quietly like every other CLI.
+    //
+    // Safe: this is the documented way to opt out, and it runs before any
+    // thread has been spawned.
+    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+
     // `color_eyre` installs a panic hook and backtrace handler. That is real
     // startup cost on a binary invoked dozens of times a minute to print
     // nothing, so it is opt-in.
