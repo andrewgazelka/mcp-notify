@@ -1,81 +1,238 @@
-use eyre::WrapErr as _;
-use std::os::fd::AsRawFd as _;
+//! `notify` - speak short status updates on macOS.
+//!
+//! Two properties define this tool and must survive every change:
+//!
+//! 1. **You never wait.** The caller returns in bounded time and audio starts
+//!    promptly, even when the neural backend is cold, broken, or absent.
+//! 2. **Messages never overlap.** Utterances are serialized, including across
+//!    the boundary between the daemon and the `say` fallback.
 
-fn get_lock_file_path() -> eyre::Result<std::path::PathBuf> {
-    let home =
-        std::env::var("HOME").map_err(|_| eyre::eyre!("HOME environment variable not set"))?;
+mod config;
+mod daemon;
+mod proto;
+mod say;
 
-    let lock_dir = std::path::PathBuf::from(home).join(".notify-lock");
-    std::fs::create_dir_all(&lock_dir)
-        .wrap_err_with(|| format!("failed to create lock directory at {}", lock_dir.display()))?;
+use config::{Backend, Engine, Flags, Priority, Settings};
 
-    Ok(lock_dir.join("say.lock"))
+const USAGE: &str = "\
+notify - speak short status updates
+
+usage:
+  notify [options] <text>...
+  notify --status
+
+options:
+  --backend <auto|daemon|say>   where to speak (default: auto)
+  --engine  <holler|dots>       neural engine when using the daemon
+  --voice   <name>              voice name (default: oliver)
+  --rate    <float>             pitch-preserving speed, 0.5-3.0 (default: 1.5)
+  --priority <low|normal|high>  queue priority
+  --interrupt                   cut off whatever is speaking now
+  --status                      print daemon state and resolved settings
+  -h, --help                    this text
+  -V, --version                 version
+  --                            end of options; everything after is text
+
+environment:
+  NOTIFY_BACKEND NOTIFY_ENGINE NOTIFY_VOICE NOTIFY_RATE NOTIFY_PRIORITY
+  NOTIFY_SOCKET NOTIFY_CONFIG NOTIFY_STATE_DIR NOTIFY_DEBUG
+
+config:
+  $XDG_CONFIG_HOME/notify/config.toml (default ~/.config/notify/config.toml)
+";
+
+/// Everything the command line asked for.
+struct Parsed {
+    flags: Flags,
+    text: String,
+    status: bool,
+    /// Internal: this process *is* the backgrounded `say` child.
+    exec_wpm: Option<u32>,
+    exec_voice: Option<String>,
 }
 
-fn lock_file(file: &std::fs::File) -> std::io::Result<()> {
-    let fd = file.as_raw_fd();
-    let result = unsafe { libc::flock(fd, libc::LOCK_EX) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error())
+fn parse_args(argv: &[String]) -> eyre::Result<Parsed> {
+    let mut p = Parsed {
+        flags: Flags::default(),
+        text: String::new(),
+        status: false,
+        exec_wpm: None,
+        exec_voice: None,
+    };
+    let mut words: Vec<String> = Vec::new();
+    let mut i = 0;
+
+    // Hand-rolled rather than clap: there are a handful of flags, the payload is
+    // free-form prose that must pass through byte-for-byte, and this binary runs
+    // dozens of times a minute so its startup cost is the product.
+    while i < argv.len() {
+        let a = &argv[i];
+
+        // Once we hit the text, everything after is text - including things that
+        // look like flags. Otherwise "--rate limiting is broken" loses a word.
+        if !words.is_empty() {
+            words.push(a.clone());
+            i += 1;
+            continue;
+        }
+
+        let mut need = |name: &str| -> eyre::Result<String> {
+            i += 1;
+            argv.get(i)
+                .cloned()
+                .ok_or_else(|| eyre::eyre!("{name} requires a value"))
+        };
+
+        match a.as_str() {
+            "--" => {
+                words.extend_from_slice(&argv[i + 1..]);
+                break;
+            }
+            "-h" | "--help" => {
+                print!("{USAGE}");
+                std::process::exit(0);
+            }
+            "-V" | "--version" => {
+                println!("notify {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
+            "--status" => p.status = true,
+            "--interrupt" => p.flags.interrupt = true,
+            "--backend" => p.flags.backend = Some(Backend::parse(&need("--backend")?)?),
+            "--engine" => p.flags.engine = Some(Engine::parse(&need("--engine")?)?),
+            "--voice" => p.flags.voice = Some(need("--voice")?),
+            "--priority" => p.flags.priority = Some(Priority::parse(&need("--priority")?)?),
+            "--rate" => {
+                let v = need("--rate")?;
+                p.flags.rate = Some(
+                    v.parse()
+                        .map_err(|_| eyre::eyre!("--rate {v:?} is not a number"))?,
+                );
+            }
+            // Internal contract with the backgrounded child.
+            "--exec" => p.exec_wpm = Some(config::DEFAULT_SAY_WPM),
+            "--wpm" => {
+                let v = need("--wpm")?;
+                p.exec_wpm = Some(
+                    v.parse()
+                        .map_err(|_| eyre::eyre!("--wpm {v:?} is not a number"))?,
+                );
+            }
+            "--say-voice" => p.exec_voice = Some(need("--say-voice")?),
+            other => words.push(other.to_string()),
+        }
+        i += 1;
     }
+
+    p.text = words.join(" ").trim().to_string();
+    Ok(p)
 }
 
-fn speak(text: &str) -> eyre::Result<()> {
-    let lock_path = get_lock_file_path()?;
-    let lock_file_handle = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&lock_path)
-        .wrap_err_with(|| format!("failed to open lock file at {}", lock_path.display()))?;
-
-    lock_file(&lock_file_handle).wrap_err("failed to acquire lock")?;
-
-    let output = std::process::Command::new("say")
-        .arg("-r")
-        .arg("300")
-        .arg(text)
-        .output()
-        .wrap_err("failed to execute say command")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        eyre::bail!("say command failed: {}", stderr);
+/// Re-exec ourselves detached so the caller returns immediately, then let the
+/// child block on the lock and on `say`.
+fn spawn_say_child(text: &str, wpm: u32, voice: Option<&str>) -> eyre::Result<()> {
+    let exe = std::env::current_exe().unwrap_or_else(|_| "notify".into());
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("--exec").arg("--wpm").arg(wpm.to_string());
+    if let Some(v) = voice {
+        cmd.arg("--say-voice").arg(v);
     }
+    cmd.arg("--").arg(text);
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    cmd.spawn()
+        .map(|_| ())
+        .map_err(|e| eyre::eyre!("failed to spawn background process: {e}"))
+}
 
-    Ok(())
+fn debug_enabled() -> bool {
+    std::env::var_os("NOTIFY_DEBUG").is_some_and(|v| !v.is_empty() && v != "0")
+}
+
+fn print_status(settings: &Settings) {
+    println!("backend        {}", settings.backend.as_str());
+    println!("engine         {}", settings.engine.as_str());
+    println!("voice          {}", settings.voice);
+    println!("rate           {:.2}", settings.rate);
+    println!("say fallback   say -r {}", settings.say_wpm);
+    println!("socket         {}", settings.socket.display());
+    println!("state          {}", settings.state_file.display());
+    println!(
+        "config         {}",
+        config::config_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<none>".into())
+    );
+    print!("daemon         ");
+    match daemon::read_state(&settings.state_file) {
+        Ok(s) => {
+            println!("pid {} phase {} ready {}", s.pid, s.phase, s.ready);
+            for (name, st) in &s.engines {
+                println!("  engine {name:<8} {st}");
+            }
+            if let Some(d) = &s.download {
+                let pct = if d.total > 0 {
+                    (d.bytes as f64 / d.total as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!("  downloading {} {:.1}%", d.repo, pct);
+            }
+        }
+        Err(e) => println!("unavailable - {e}"),
+    }
 }
 
 fn main() -> eyre::Result<()> {
-    color_eyre::install()?;
-
-    let args: Vec<String> = std::env::args().collect();
-
-    // If called with --exec, actually speak (this is the backgrounded child)
-    if args.len() >= 3 && args[1] == "--exec" {
-        let text = args[2..].join(" ");
-        return speak(&text);
+    // `color_eyre` installs a panic hook and backtrace handler. That is real
+    // startup cost on a binary invoked dozens of times a minute to print
+    // nothing, so it is opt-in.
+    if debug_enabled() {
+        color_eyre::install()?;
     }
 
-    if args.len() < 2 {
-        eyre::bail!("usage: notify <text>");
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let parsed = parse_args(&argv)?;
+
+    // The backgrounded child: just speak and exit. No config, no daemon.
+    if let Some(wpm) = parsed.exec_wpm {
+        return say::speak(&parsed.text, wpm, parsed.exec_voice.as_deref());
     }
 
-    let text = args[1..].join(" ");
+    let file = match config::config_path() {
+        Some(p) => config::FileConfig::load_or_warn(&p),
+        None => config::FileConfig::default(),
+    };
+    let settings = Settings::resolve(&file, &parsed.flags)?;
 
-    // Spawn ourselves in background with --exec flag
-    let exe = std::env::current_exe().wrap_err("failed to get current executable")?;
-    std::process::Command::new(exe)
-        .arg("--exec")
-        .arg(&text)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .wrap_err("failed to spawn background process")?;
+    if parsed.status {
+        print_status(&settings);
+        return Ok(());
+    }
 
-    Ok(())
+    if parsed.text.is_empty() {
+        eprint!("{USAGE}");
+        eyre::bail!("no text given");
+    }
+
+    let say_voice = settings.say_voice.clone();
+    let fallback =
+        || spawn_say_child(&parsed.text, settings.say_wpm, say_voice.as_deref());
+
+    match settings.backend {
+        Backend::Say => fallback(),
+        Backend::Auto | Backend::Daemon => match daemon::try_speak(&settings, &parsed.text) {
+            Ok(()) => Ok(()),
+            Err(why) => {
+                if debug_enabled() {
+                    eprintln!("notify: falling back to say - {why}");
+                }
+                // Ask launchd to bring the daemon back for *next* time. Rate
+                // limited internally, and never blocks this call.
+                daemon::maybe_kickstart(&settings);
+                fallback()
+            }
+        },
+    }
 }
