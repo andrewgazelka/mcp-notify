@@ -198,6 +198,7 @@ final class AudioPlayer: @unchecked Sendable {
         chunks: AsyncThrowingStream<[Float], Error>,
         sampleRate: Double,
         rate: Float,
+        gain: Float = 1.0,
         onFirstBuffer: (() -> Void)? = nil
     ) async throws {
         try start()
@@ -232,7 +233,11 @@ final class AudioPlayer: @unchecked Sendable {
         var didStart = false
 
         for try await raw in chunks {
-            let samples = try resampler.map { try $0.convert(raw) } ?? raw
+            var samples = try resampler.map { try $0.convert(raw) } ?? raw
+            // Valence gain. Applied here rather than in the engine so it is a
+            // playback property: it stays out of the synthesis path and cannot
+            // affect what the model generates.
+            if gain != 1.0 { for i in 0..<samples.count { samples[i] *= gain } }
             guard let buf = buffer(samples, fmt) else { continue }
             await tracker.willSchedule()
             chain.player.scheduleBuffer(buf, completionCallbackType: .dataPlayedBack) { _ in

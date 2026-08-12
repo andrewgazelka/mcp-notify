@@ -13,6 +13,16 @@ protocol SpeechEngine: AnyObject, Sendable {
     func isLoaded() async -> Bool
     /// Chunks of mono float32 at `sampleRate`.
     func stream(text: String, voice: String) async throws -> AsyncThrowingStream<[Float], Error>
+    /// Per-utterance sampling temperature, or nil to leave the engine default.
+    /// Safe despite being engine-global state because `SpeechQueue` serialises
+    /// utterances: synthesis of the next one cannot begin until the current one
+    /// has finished playing.
+    func setTemperature(_ t: Float?)
+}
+
+extension SpeechEngine {
+    /// Engines without a temperature knob simply ignore it.
+    func setTemperature(_ t: Float?) {}
 }
 
 // MARK: - Holler
@@ -29,9 +39,11 @@ final class HollerEngine: SpeechEngine, @unchecked Sendable {
     private let repo: String
     private var config: HollerConfiguration
     private var model: HollerModel?
+    private let defaultTemperature: Float
 
     init(repo: String = "sentiuminc/holler-0.6b", codebooks: Int = 16, temperature: Float = 0.7) {
         self.repo = repo
+        self.defaultTemperature = temperature
         var c = HollerConfiguration()
         c.codebooks = codebooks
         c.temperature = temperature
@@ -63,6 +75,14 @@ final class HollerEngine: SpeechEngine, @unchecked Sendable {
     func voices() async -> [String] {
         guard let m = model else { return [] }
         return await m.voices
+    }
+
+    /// Holler's `configuration` is a plain mutable property on a final class and
+    /// `stream()` snapshots it at call time, so this takes effect on the very
+    /// next utterance and no reload is needed.
+    func setTemperature(_ t: Float?) {
+        guard let m = model else { return }
+        m.configuration.temperature = t ?? defaultTemperature
     }
 
     func stream(text: String, voice: String) async throws -> AsyncThrowingStream<[Float], Error> {

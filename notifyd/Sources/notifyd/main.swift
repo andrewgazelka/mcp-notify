@@ -120,6 +120,48 @@ func measureLevels(voice: String, n: Int) async -> Int32 {
     return 0
 }
 
+/// Speaks one line per valence family so the shaping can be judged by ear.
+/// Run it with and without `--no-prosody`; that A/B is the only thing that
+/// settles whether the table is any good.
+func valenceDemo(voice: String, rate: Float, prosody: Bool) async -> Int32 {
+    let lines = [
+        "delighted: seventeen times faster, and the bench confirms it",
+        "relieved: the gate passed first try",
+        "worrying: flat metrics after eight minutes, investigating now",
+        "tedious: forty one directories, fourteen levels, one request each",
+        "frustrating: the same test has failed three times for three different reasons",
+        "embarrassing: I claimed that file was unchanged and it was not",
+        "surprising: the batch endpoint already existed, with zero callers",
+    ]
+    let engine = HollerEngine()
+    do { try await engine.load() } catch { print("demo: load failed - \(error)"); return 1 }
+    let player = AudioPlayer()
+    do { try player.start() } catch { print("demo: audio failed - \(error)"); return 1 }
+
+    setvbuf(stdout, nil, _IOLBF, 0)
+    print("valence demo  prosody=\(prosody)  rate=\(rate)")
+    for line in lines {
+        let shaped = prosody ? Valence.shape(line) : Valence.Shaped(text: line, profile: nil)
+        let p = shaped.profile
+        // Pad in Swift, not with %s: String(format:) "%s" expects a C string
+        // pointer and passing an NSString through CVarArg segfaults.
+        let fam = (p?.family ?? "none").padding(toLength: 9, withPad: " ", startingAt: 0)
+        print(fam + String(format: " temp %.2f  gain %+.1f dB  rate x%.2f",
+                           p?.temperature ?? 0.7, p?.gainDB ?? 0, p?.rateScale ?? 1.0))
+        print("    \(shaped.text)")
+        engine.setTemperature(p?.temperature)
+        do {
+            let chunks = try await engine.stream(text: shaped.text, voice: voice)
+            try await player.play(
+                chunks: chunks, sampleRate: engine.sampleRate,
+                rate: rate * (p?.rateScale ?? 1.0),
+                gain: p.map { Valence.linearGain(db: $0.gainDB) } ?? 1.0)
+        } catch { print("    error \(error)") }
+        try? await Task.sleep(nanoseconds: 400_000_000)
+    }
+    return 0
+}
+
 func selftestAudio() -> Int32 {
     let player = AudioPlayer()
     do { try player.start() } catch {
@@ -302,7 +344,7 @@ final class TTFABox: @unchecked Sendable {
 
 // MARK: - serve
 
-func serve(preload: [EngineKind]) async -> Int32 {
+func serve(preload: [EngineKind], prosody: Bool = true) async -> Int32 {
     let socketPath = Paths.socket
     let state = StateFile(dir: Paths.stateDir, socketPath: socketPath)
     await state.set(phase: "starting", ready: false)
@@ -311,7 +353,7 @@ func serve(preload: [EngineKind]) async -> Int32 {
     let registry = EngineRegistry(make: makeEngine) { name, status in
         Task { await state.setEngine(name, status) }
     }
-    let queue = SpeechQueue(player: player, engines: registry, log: logLine)
+    let queue = SpeechQueue(player: player, engines: registry, prosody: prosody, log: logLine)
 
     let server = SocketServer(path: socketPath, log: logLine) { req in
         switch req.op {
@@ -425,6 +467,9 @@ func run() async -> Int32 {
     let doSelftest = flag("--selftest-metal")
     let doSelftestAudio = flag("--selftest-audio")
     let doLevels = flag("--measure-levels")
+    let doValenceDemo = flag("--valence-demo")
+    let noProsody = flag("--no-prosody")
+        || ProcessInfo.processInfo.environment["NOTIFY_PROSODY"] == "0"
     let doBake = flag("--bake-ref")
     let doBench = flag("--bench")
     let doSay = flag("--say")
@@ -439,10 +484,11 @@ func run() async -> Int32 {
     if doSelftest { return selftestMetal() }
     if doSelftestAudio { return selftestAudio() }
     if doLevels { return await measureLevels(voice: voice, n: n) }
+    if doValenceDemo { return await valenceDemo(voice: voice, rate: rate, prosody: !noProsody) }
     if doBake { return await bakeReference() }
     if doBench { return await bench(engineKind: engineKind, voice: voice, rate: rate, n: n) }
     if doSay { return await sayOnce(text: text, engineKind: engineKind, voice: voice, rate: rate) }
-    if doServe { return await serve(preload: [.holler]) }
+    if doServe { return await serve(preload: [.holler], prosody: !noProsody) }
 
     print("""
     notifyd - resident neural voice for notify
@@ -451,6 +497,8 @@ func run() async -> Int32 {
       --selftest-metal             verify Metal shaders are linked
       --selftest-audio             report the audio quality parameters in effect
       --measure-levels             raw output level distribution (AGC calibration)
+      --valence-demo               speak one line per valence family
+      --no-prosody                 disable valence-keyed prosody shaping
       --bake-ref                   generate the shared Oliver reference clip
       --bench [--engine E] [--n N] measure TTFA at the speaker
       --say --text T [--engine E]  one-shot synthesize and play

@@ -34,10 +34,17 @@ actor SpeechQueue {
     private let dropNormalAbove = 8
     private let dedupeWindow: TimeInterval = 2.0
 
+    /// Valence-keyed prosody shaping. On by default; `NOTIFY_PROSODY=0` or
+    /// `notifyd --no-prosody` turns it off, which exists so the two can be
+    /// compared by ear rather than argued about.
+    private let prosody: Bool
+
     init(player: AudioPlayer, engines: EngineRegistry,
+         prosody: Bool = true,
          log: @escaping @Sendable (String) -> Void) {
         self.player = player
         self.engines = engines
+        self.prosody = prosody
         self.log = log
     }
 
@@ -124,7 +131,16 @@ actor SpeechQueue {
         guard let engine = await engines.engine(item.engine) else {
             throw NotifydError.engineUnavailable(item.engine.rawValue)
         }
-        let chunks = try await engine.stream(text: item.text, voice: item.voice)
+        // Valence-keyed prosody. The leading emotion word is a free, exact
+        // label; this turns it into delivery instead of leaving it purely
+        // lexical. Unrecognised or colon-less lines come back untouched with a
+        // nil profile and behave exactly as before.
+        let shaped = prosody ? Valence.shape(item.text) : Valence.Shaped(text: item.text, profile: nil)
+        engine.setTemperature(shaped.profile?.temperature)
+        let gain = shaped.profile.map { Valence.linearGain(db: $0.gainDB) } ?? 1.0
+        let rate = item.rate * (shaped.profile?.rateScale ?? 1.0)
+
+        let chunks = try await engine.stream(text: shaped.text, voice: item.voice)
 
         // The cross-process lock is taken around PLAYBACK ONLY, immediately
         // before the node starts, and released when the last buffer has been
@@ -136,7 +152,8 @@ actor SpeechQueue {
         try await player.play(
             chunks: chunks,
             sampleRate: engine.sampleRate,
-            rate: item.rate,
+            rate: rate,
+            gain: gain,
             onFirstBuffer: { lock.acquire() }
         )
     }

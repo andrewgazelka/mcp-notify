@@ -266,6 +266,60 @@ Re-check when someone ports 2.5 to MLX.
 | **Kokoro-82M** | Confirmed no tags, no emotion control. A less expressive Holler. |
 | **ElevenLabs v3** | Best tag system by a distance. Cloud only, fails the local requirement outright. |
 
+#### What was actually built: valence-keyed prosody
+
+Implemented in `notifyd/Sources/notifyd/Valence.swift`, on by default,
+`--no-prosody` or `NOTIFY_PROSODY=0` to disable for A/B.
+
+Every notify line already opens with an explicit emotion word, which is a free
+and perfectly reliable label sitting at the front of the utterance. Seven
+families, each setting four things: the separator that replaces the colon,
+terminal punctuation, sampling temperature, playback gain, and rate.
+
+| Family | Words (examples) | Separator | Temp | Gain | Rate |
+|---|---|---|---|---|---|
+| bright | delighted, proud, satisfying, excited | `!` | 0.75 | +1.0 dB | 1.04x |
+| settled | relieved, reassured, confident | `,` | 0.68 | +0.3 dB | 0.98x |
+| tense | worrying, uneasy, concerning, anxious | `...` | 0.72 | +0.5 dB | 1.06x |
+| flat | tedious, disappointing, dull | `.` | 0.62 | -1.0 dB | 0.96x |
+| sharp | frustrating, annoyed, irritating | `.` | 0.70 | +1.2 dB | 1.02x |
+| contrite | embarrassing, wrong, sorry, mistaken | `...` | 0.66 | -1.5 dB | 0.94x |
+| alert | surprising, confusing, curious, puzzled | `,` | 0.74 | +0.8 dB | 1.02x |
+
+Design constraints worth preserving:
+
+- **It never changes a word.** It rewrites the separator, supplies terminal
+  punctuation only when the line ends bare, and nudges three continuous
+  parameters. If it starts editing prose it has become a different feature.
+- **Unrecognised input degrades to exactly the old behaviour**, with a nil
+  profile: no colon, a colon more than 40 characters in (`ratio 3:1` is
+  content, not a valence prefix), or an unknown word.
+- **The prefix may be a phrase.** Lines like `uneasy but glad I checked:` are
+  normal, so every word before the colon is checked and the first recognised
+  one wins.
+- **Temperature range is deliberately narrow** (0.62 to 0.75). Holler applies
+  temperature to all 16 RVQ codebooks including the fine acoustic levels, so
+  past roughly 0.8 it buys timbral roughness rather than expression.
+- **Gain is the most reliable lever.** Loudness is the strongest perceptual cue
+  for arousal and it is exact and free, unlike whatever the model may or may not
+  do with punctuation.
+- **Gain is applied at playback, not in the engine**, so it cannot influence
+  what the model generates.
+
+Per-utterance temperature is safe despite being engine-global state, because
+`SpeechQueue` serialises utterances: synthesis of the next cannot begin until
+the current one has finished playing. `HollerModel.configuration` is a mutable
+property on a final class and `stream()` snapshots it at call time, so it takes
+effect on the next utterance with no reload.
+
+Measured cost: none. TTFA median stayed at ~305 ms across repeated runs. One
+run read 399 ms and was traced to a load average of 21.8 from unrelated work on
+the machine, not to this change.
+
+`notifyd --valence-demo` speaks one line per family; run it with and without
+`--no-prosody`, since that A/B is the only thing that settles whether the table
+is any good.
+
 #### The free wins, which should be tried first
 
 1. **The AGC fix above is the highest-value expressivity change already made.**
